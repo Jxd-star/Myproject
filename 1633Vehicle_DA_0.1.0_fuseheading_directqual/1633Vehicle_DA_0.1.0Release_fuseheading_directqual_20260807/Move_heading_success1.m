@@ -1,0 +1,39 @@
+function  [rm , rn , imu , q , cbn , g , fn , vel1 , v_ins , att_ins , att1 , pos1 , wnbb , fnn ] = Move_heading_success1(imu , e , re , wie , pos , vel, g0 , q , t , bw , cbn , flag1 )
+
+
+
+%% -----------------------------------------------------------------------------------------------------------------------------------------------------
+rm = re * ( 1 - 2 * e + 3 * e * sin(pos(1)) ^ 2 ) ;   %
+rn = re * ( 1 + e * sin(pos(1)) ^ 2 ) ;               %
+
+
+%% 姿态解算
+imu(4 : 6) = imu(4 : 6) - bw ;
+
+% win = [-vel(2) / (rm + pos(3))   ;   vel(1) / (rn + pos(3)) + wie * cos(pos(1)) ;   vel(1) / (rn + pos(3)) * tan(pos(1)) + wie * sin(pos(1))] ;  %win= Wie+wen,地球自转角速率及位置速率
+% win = [0   ;    wie * cos(pos(1)) ;   wie * sin(pos(1))] ;  %win= Wie+wen,地球自转角速率及位置速率
+% wnbb = imu(4 : 6)' - cbn' * win   ;    %陀螺仪
+wnbb = imu(4 : 6)' ;    %陀螺仪
+
+% if  flag1 ==0 
+%     wnbb = wnbb + cbn' * win ;
+% end
+
+%% 四元数更新及归一化
+q = q2q(wnbb , q , t) ;
+
+%% cbn更新
+cbn = q2mat(q) ;
+att1 = mat2a(cbn) ;  % 姿态角更新
+
+%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+g = g0 * ( 1 + 5.3024e-3 * sin(pos(1)) ^ 2 - 5.82e-6 * sin(2 * pos(1))^ 2 ) - 3.086e-6 * pos(3)  ;   %正常重力
+fn = cbn * (imu(1 : 3)'  * 9.794362833435068) ;    %比力方程
+
+%% 速度解算
+[vel1 , fnn] = Velocity(vel , fn , wie , pos , t , g , rm , rn) ;
+v_ins  = vel1 ;
+att_ins  = att1 ;
+%% 位置解算
+pos1 = Position(rm , rn , pos , vel , vel1, t) ;
+end

@@ -1,0 +1,546 @@
+%% <Section name="Preparing">
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                                                                              %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% <Environment>
+close all;
+clear;
+clc;
+format longE;
+format compact;
+% </Environment>
+
+% <MatlabDebug>
+begintime = datetime;
+% </MatlabDebug>
+
+%% <Subsection name="Data Load">
+% imu = importdata('D:\Desktop\1633\data\20250521\IMU1.txt').data  ;    %
+% gnss = importdata('D:\Desktop\1633\data\20250521\GNSS1.txt').data  ;
+% 
+% imu = importdata('D:\Desktop\1633\data\20250603\IMU1.txt').data  ;    %
+% gnss = importdata('D:\Desktop\1633\data\20250603\GNSS1.txt').data  ;
+
+
+% imu(50001 : end , :) = [] ;
+% gnss(5001 : end , :) = [] ;
+% imu = importdata('D:\Desktop\1633\data\20250604\IMU1.txt').data  ;    %
+% gnss = importdata('D:\Desktop\1633\data\20250604\GNSS1.txt').data  ;
+
+% imu = importdata('.\IMU2.txt').data  ;    % 1 , 2
+% gnss = importdata('.\GNSS2.txt').data  ;
+
+
+% imu = importdata('D:\Desktop\1633\data\20250529\IMU1.txt').data  ;    %
+% gnss = importdata('D:\Desktop\1633\data\20250529\GNSS1.txt').data  ;
+% % 
+% imu = importdata('D:\Desktop\1633\data-途观\20250618-单点\2\IMU1.txt').data  ;    %
+% gnss = importdata('D:\Desktop\1633\data-途观\20250618-单点\2\GNSS1.txt').data  ;
+
+% imu = importdata('D:\Desktop\觉悟科技\高德红外数据-20251219\IMU3.txt').data  ;    %
+% gnss = importdata('D:\Desktop\觉悟科技\高德红外数据-20251219\GNSS3.txt').data  ;
+
+% imu(100001 : end , :) = []  ;    %
+% gnss(10001 : end , :) = []  ;
+% </Subsection>
+
+%% <Subsection name="Record Definition">
+att_rcd = zeros(size(gnss, 1) * 10, 3);
+att_ins_rcd = zeros(size(gnss, 1) * 10, 3);
+dong_jing_tai_rcd = zeros(size(gnss, 1) * 10 - 200, 1, "int32");
+goe_rcd = zeros(size(gnss, 1), 8);
+gps_rcd = zeros(size(gnss, 1), 10);
+imu_rcd = zeros(size(imu, 1), 23);
+P_fil_rcd = zeros(size(gnss, 1) * 10, 18);
+pos_rcd = zeros(size(gnss, 1) * 10, 3);
+v_ins_rcd = zeros(size(gnss, 1) * 10, 3);
+vel_rcd = zeros(size(gnss, 1) * 10, 3);
+X_fil_rcd = zeros(size(gnss, 1) * 10, 18);
+% <MatlabDebug>
+aaa = zeros(size(gnss, 1), 4);
+% </MatlabDebug>
+% </Subsection>
+
+% </Section>
+
+
+
+%% <Section Name="Config Definition">
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                                                                              %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Config.cvb = eye(3);
+Config.cvb_nhc = eye(3);
+Config.Lever_Arm_GNSS = [0.00 ; 0.00 ; 0.00] ;   % 杆臂值补偿 --- 手动配置
+Config.Lever_Arm_ODO =  [0.00 ; 0.00 ; 0.00] ;   % 杆臂值补偿odo,单位m
+Config.Lever_Arm_NHC =  [0.00 ; 0.00 ; 0.00] ;   % 杆臂值补偿nhc,单位m
+
+Config.Lever_Arm_GNSS = [0.25 ; -0.95 ; 1.35] ;   % 杆臂值补偿 --- 手动配置
+Config.Lever_Arm_ODO =  [0.25 ; -1.35 ; 0] ;   % 杆臂值补偿odo,单位m
+Config.Lever_Arm_NHC =  [0.25 ; 0.00 ; -0.00] ;   % 杆臂值补偿nhc,单位m
+
+Config.k0001 = 0.9;    %后左轮刻度系数
+Config.k0002 = 0.9;    %后右轮刻度系数
+Config.k0003 = 0.9;   % 前右轮刻度系数
+Config.k0004 = 0.9;   % 前右轮刻度系数
+Config.Heading_Comp = deg2rad(0.0);   % 双天线安装角配置单位：度，与GI320的+Y轴相比顺时针旋转了多少度(范围0~360），默认0度
+
+
+Config.KalmanParams.P_diag = [...
+    [0, 0, 0] , ...
+    [0, 0, 0] * 1, ...
+    [0, 0, 0] * 1,...
+    [1, 1, 10] / 57 / 3600 * 0.1, ...
+    [1e-4 , 1e-4 , 1e-4 ], ...
+    [50/57 , 10 , 30/57 ] * 1e-1 ...
+] .^ 2;
+Config.KalmanParams.Q_Diag = ([[1 , 1 , 1] * 0.2e-5 , [1 , 1 , 1] * 1e-4]) .^2;
+Config.KalmanParams.R_Qual1_Diag = [[1, 1, 1] * 0.02 , [1, 1, 1] * 0.02 , 0.01 / 180 * pi] .^2;
+Config.KalmanParams.R_Qual2_Diag = [[1, 1, 1] * 0.02 , [1, 1, 1] * 0.02 , 0.01 / 180 * pi] .^2;
+Config.KalmanParams.R_Qual5_Diag = [[1, 1, 1] * 0.02 , [1, 1, 1] * 0.02 , 0.01 / 180 * pi] .^2;
+Config.KalmanParams.R_QualE_Diag = [[1, 1, 1] * 0.02 , [1, 1, 1] * 0.005 , 0.01 / 180 * pi  ] .^2;
+
+Config.d_yaw_v2b = zeros(1, 1) ;
+% </Section>
+
+
+
+%% <Section Name="Status Definition and Initialization">
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                                                                              %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% <Subsection name="General Status Definition">
+% General Data
+generalstatus.Step = Algo_Step_Type.ALGO_STEP_DEFAULT;
+generalstatus.FirstInit_Flag = zeros(1, 1, "logical");
+generalstatus.StepInitFlag = zeros(1, 1, "logical");
+generalstatus.Gps123_Prv = zeros(1, 3);
+
+generalstatus.counterimu = zeros(1, 1, "int32");
+generalstatus.imu12eq0cnt = zeros(1, 1, "int32");
+generalstatus.imu14eq0cnt = zeros(1, 1, "int32");
+generalstatus.Value_odo_flag = zeros(1, 1, "int32");
+generalstatus.flag1 = zeros(1, 1, "int32");   %静态标志位0 ， 1表示动态
+generalstatus.gps_latest = zeros(1, 10);
+generalstatus.goe_latest = zeros(1, 8);
+generalstatus.goe12_latest = zeros(1, 2, "int32");
+% Shared Data
+generalstatus.cbn = zeros(3, 3);
+generalstatus.q = zeros(4, 1);
+generalstatus.Mpv = zeros(3, 3);
+generalstatus.bw = zeros(1, 3);
+generalstatus.xita = zeros(1, 2);
+generalstatus.p1111 = zeros(1, 3);
+generalstatus.att = zeros(1, 3);
+generalstatus.pos = zeros(1, 3);
+% Operations
+generalstatus.ExtParamsCalib_TrgFlag = zeros(1, 1, "logical");
+% </Section>
+
+%% <Subsection name="General Status Initialization">
+% generalstatus.StepInitFlag = true; % Not neccessary for Init Step
+
+% <MatlabDebug> Simulate only
+generalstatus.ExtParamsCalib_TrgFlag = false;
+% </MatlabDebug>
+
+generalstatus.FirstInit_Flag = true;
+
+generalstatus.Mpv = [0,      1 / Consts.re, 0; ...
+                     1 / Consts.re, 0,      0; ...
+                     0,      0,             1];  % 初始矩阵，把米转化为弧度
+% </Section>
+
+%% <Subsection name="Init Step Status Definition">
+initstepstatus.counterimu = zeros(1, 1, "int32");
+initstepstatus.countergnss = zeros(1, 1, "int32");
+initstepstatus.countergnss_value = zeros(1, 1, "int32");
+
+initstepstatus.skipoutputcalcflag = zeros(1, 1, "logical");
+
+initstepstatus.initflags_part1 = zeros(1, 1, "logical");
+initstepstatus.initflags_part3 = zeros(1, 1, "logical");
+initstepstatus.initflags_part4 = zeros(1, 1, "logical");
+initstepstatus.initflags_part5 = zeros(1, 1, "logical");
+initstepstatus.initflags_part6 = zeros(1, 1, "logical");
+
+initstepstatus.imu123sum_part1 = zeros(1, 3);
+initstepstatus.gps1234sum_part3 = zeros(1, 4);
+initstepstatus.imu456sum_part4 = zeros(1, 3);
+initstepstatus.imu_std1_part5 = zeros(Consts.length_imu_std1_tmp_part5, 2);
+initstepstatus.y1_part6 = zeros(11, 1);
+initstepstatus.p111_abs_part6 = zeros(Consts.length_p111_part6, 3);
+
+% </Subsection>
+
+%% <Subsection name="Init Step Status Initialization">
+% </Subsection>
+
+%% <Subsection name="Main Step Status Definition">
+
+mainstepstatus.DetermineTrackStatus.gps38_prv = zeros(1, 2);
+mainstepstatus.DetermineTrackStatus.gps38_prv_validflag = zeros(1, 1, "logical");
+
+mainstepstatus.RecalculateGyroBiasStatus.dong_jing_taieq0_cnt = zeros(1, 1, "int32");
+mainstepstatus.RecalculateGyroBiasStatus.imuinput456_rcd = zeros(2009, 3); % [-2009, -1]
+mainstepstatus.RecalculateGyroBiasStatus.imuinput456_idx = zeros(1, 1, "int32");
+mainstepstatus.RecalculateGyroBiasStatus.imuinput456_sum = zeros(1, 3);
+mainstepstatus.RecalculateGyroBiasStatus.imuinput456_sum_recalc = zeros(1, 3);
+
+mainstepstatus.OdoExtParamsCalibStatus.ExtParamsCalib_RunningFlag = zeros(1, 1, "logical");
+mainstepstatus.OdoExtParamsCalibStatus.i_Xfilter_odo_angle_k = zeros(1, 1, "int32"); %外参标定存储index
+mainstepstatus.OdoExtParamsCalibStatus.x_filter202122_rcd = zeros(40, 45, 3);
+mainstepstatus.OdoExtParamsCalibStatus.x_filter202122_idx = zeros(1, 1, "int32");
+mainstepstatus.OdoExtParamsCalibStatus.x_filter202122_sum = zeros(1, 1, 3);
+mainstepstatus.OdoExtParamsCalibStatus.x_filter202122_sum_recalc = zeros(1, 1, 3);
+mainstepstatus.OdoExtParamsCalibStatus.x_filter202122_groupmax = zeros(1, 45, 3);
+mainstepstatus.OdoExtParamsCalibStatus.x_filter202122_groupmin = zeros(1, 45, 3);
+
+mainstepstatus.counterimu = zeros(1, 1, "int32");
+mainstepstatus.countergnss = zeros(1, 1, "int32");
+mainstepstatus.y1 = zeros(11, 1);
+mainstepstatus.imu6_1_rcd = zeros(5, 1); % [-5, -1]
+mainstepstatus.imu6_1_idx = zeros(1, 1, "int32");
+mainstepstatus.imu6_1_sum = zeros(1, 1);
+mainstepstatus.imu6_1_sum_recalc = zeros(1, 1);
+mainstepstatus.imu6_2_rcd = zeros(22, 1); % [-54, 0]
+mainstepstatus.imu6_2_idx = zeros(1, 1, "int32");
+mainstepstatus.imu6_2_sum = zeros(1, 1);
+mainstepstatus.imu6_2_sum_recalc = zeros(1, 1);
+mainstepstatus.gps123_prv = zeros(1, 3);
+mainstepstatus.gps567_prv = zeros(1, 3);
+mainstepstatus.gps8_1_rcd = zeros(20, 1);
+mainstepstatus.gps8_1_idx = zeros(1, 1, "int32");
+mainstepstatus.gps8_2_rcd = zeros(5, 2); % [-5, -1]
+mainstepstatus.gps8_2_idx = zeros(1, 1, "int32");
+mainstepstatus.gps8_2_sum = zeros(1, 2);
+mainstepstatus.gps8_2_sum_recalc = zeros(1, 2);
+mainstepstatus.gps10_prv = zeros(1, 1);
+
+mainstepstatus.start_trj = zeros(1, 1, "int32");  % 根据GNSS航迹航向角自寻标志位 ， 0表示没有成功
+mainstepstatus.k0 = zeros(1, 1, "int32"); % 动静态判断条件，累加器
+mainstepstatus.k1 = zeros(1, 1, "int32");  % 判断千寻服务，1表示没有，2表示有
+mainstepstatus.x_filter = zeros(18, 1);
+mainstepstatus.p_filter = zeros(18, 18); %误差方差
+mainstepstatus.k_diff_gps_yaw = zeros(1, 1, "int32");
+mainstepstatus.xita_yaw = zeros(1, 1);  % 航向偏角补偿
+mainstepstatus.k_xita = zeros(1, 1, "int32");  % 双天线安装偏差角找到后，滤波器初始化标志位，1表示需要初始化，0表示不需要
+mainstepstatus.diff_gpsyaw_sum = zeros(1, 1);
+mainstepstatus.v_b = zeros(1, 3);
+mainstepstatus.k_odo_nhc_start = zeros(1, 1, "int32");  % 使用odo稳定状态判断
+mainstepstatus.ki = zeros(1, 1, "int32");
+mainstepstatus.kalman_odo_start = zeros(1, 1, "int32");
+mainstepstatus.before_att = zeros(1, 3);
+mainstepstatus.before_vel = zeros(1, 3);
+mainstepstatus.before_pos = zeros(1, 3);
+mainstepstatus.before_imu = zeros(1, 23);
+mainstepstatus.before_v_ins = zeros(1, 3);
+mainstepstatus.an = zeros(1, 3);
+mainstepstatus.dong_jing_taieq0cnt = zeros(1, 1, "int32");
+
+mainstepstatus.y1 = zeros(11, 1);
+mainstepstatus.Yaw_rate_rcd = zeros(22, 1); % [-21, 0]
+mainstepstatus.Yaw_rate_idx = zeros(1, 1, "int32");
+mainstepstatus.Yaw_rate_sum = zeros(1, 1);
+mainstepstatus.Yaw_rate_sum_recalc = zeros(1, 1);
+
+mainstepstatus.imu456sbwabsmax_rcd = zeros(3, 1);
+mainstepstatus.imu456sbwabsmax_idx = zeros(1, 1, "int32");
+mainstepstatus.gps9lt0p01_cnt = zeros(1, 1, "int32");
+mainstepstatus.gps9lt0p1_cnt = zeros(1, 1, "int32");
+mainstepstatus.gps9gt0_cnt = zeros(1, 1, "int32");
+mainstepstatus.goe8neq0_cnt = zeros(1, 1, "int32");
+mainstepstatus.goe8lt5_cnt = zeros(1, 1, "int32");
+mainstepstatus.imu456_rcd = zeros(10, 10, 3);
+mainstepstatus.imu456_idx = zeros(1, 1, "int32");
+mainstepstatus.imu456_groupmax = zeros(1, 10, 3);
+mainstepstatus.imu456_groupmin = zeros(1, 10, 3);
+mainstepstatus.ins_wrong_cnt = zeros(1,1,"int32");
+mainstepstatus.imu456_sum_idx = zeros(1,1,"int32");
+mainstepstatus.imu456_sum_cnt_recalc = zeros(1,1,"int32");
+mainstepstatus.HeadingFusionActiveFlag = zeros(1,1,"logical");
+
+mainstepstatus.k_pitch_deviation = zeros(1, 1) ;  %俯仰安装偏角存储计数---计数到1000次结束
+mainstepstatus.sum_pitch_deviation = zeros(1, 1) ; %俯仰安装偏角累加-sum---累加到1000次结束
+mainstepstatus.initial_heading_correct_flag = false ;  %初始航向角修正标志位---只修正一次，修正完退出
+
+mainstepstatus.befor_imu8 = zeros(1, 1) ;
+mainstepstatus.befor_imu9 = zeros(1, 1) ;
+% </Subsection>
+
+%% <Subsection name="Main Step Status Initialization">
+
+mainstepstatus.imu6_1_idx = int32(1);
+mainstepstatus.imu6_2_idx = int32(1);
+mainstepstatus.gps8_1_idx = int32(1);
+mainstepstatus.gps8_2_idx = int32(1);
+mainstepstatus.imu456_sum_idx = int32(1);
+mainstepstatus.imu456_sum_cnt_recalc = int32(1);
+mainstepstatus.RecalculateGyroBiasStatus.imuinput456_idx = int32(1);
+mainstepstatus.OdoExtParamsCalibStatus.x_filter202122_idx = int32(1);
+
+mainstepstatus.k1 = int32(1);
+mainstepstatus.p_filter = diag(Config.KalmanParams.P_diag);
+mainstepstatus.HeadingFusionActiveFlag = true;
+
+mainstepstatus.imu456sbwabsmax_idx = int32(1);
+mainstepstatus.gps9_idx = int32(1);
+mainstepstatus.imu456_idx = int32(1);
+mainstepstatus.DetermineTrackStatus.yaw_correct1_prv = int32(1);
+mainstepstatus.k_xita = int32(1);  % 双天线安装偏差角找到后，滤波器初始化标志位，1表示需要初始化，0表示不需要
+% </Subsection>
+
+% </Section>
+
+
+
+%% <Section Name="Input Definition">
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                                                                              %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+input.updateflags_gnss = zeros(1, 1, "logical");
+input.gnsstimeoutflag = zeros(1, 1, "logical");
+input.imu = zeros(1, 25);
+input.gnss = zeros(1, 45);
+% </Section>
+
+
+%% <Section Name="Loop">
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                                                                              %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% <Subsection name="MainLoop">
+for i = 1:size(gnss, 1) * 10 - 100
+
+    
+    
+    % <MatlabDebug>
+    gnssidx = fix((i - 1) / 10) + 1;
+    % if i > 940000  && i < 1000000
+    %     gnss(gnssidx, :) = gnss(gnssidx, :) * 0 ;
+    % end
+    gnssupdateflag = mod(i - 1, 10) == 0;
+    gnsstimeoutflag = gnssupdateflag && (gnss(gnssidx, 33) == 0 || gnss(gnssidx, 38) == 0);
+    
+    input.updateflags_gnss = gnssupdateflag; % gps and goe update
+    input.gnsstimeoutflag = gnsstimeoutflag;
+    
+    input.imu = imu(i, :);
+    if gnssupdateflag
+        input.gnss = gnss(gnssidx, :);
+    else
+        input.gnss = zeros(1, size(gnss, 2));
+    end
+    % </MatlabDebug>
+
+    [Config, generalstatus, initstepstatus, mainstepstatus, output] = Algo_Handler(Config, generalstatus, initstepstatus, mainstepstatus, input);
+
+    % <MatlabDebug>
+    if output.updateflags_att
+        att_rcd(i, :) = output.att;
+    end
+    if output.updateflags_att_ins
+        att_ins_rcd(i, :) = output.att_ins;
+    end
+    if output.updateflags_dong_jing_tai
+        dong_jing_tai_rcd(i, :) = output.dong_jing_tai;
+    end
+    if output.updateflags_goe
+        goe_rcd(gnssidx, :) = output.goe;
+    end
+    if output.updateflags_gps
+        gps_rcd(gnssidx, :) = output.gps;
+    end
+    if output.updateflags_imu
+        imu_rcd(i, :) = output.imu;
+    end
+    if output.updateflags_P_fil
+        P_fil_rcd(i, :) = output.P_fil;
+    end
+    if output.updateflags_pos
+        pos_rcd(i, :) = output.pos;
+    end
+    if output.updateflags_vel
+        vel_rcd(i, :) = output.vel;
+    end
+    if output.updateflags_v_ins
+        v_ins_rcd(i, :) = output.v_ins;
+    end
+    if output.updateflags_X_fil
+        X_fil_rcd(i, :) = output.X_fil;
+    end
+    % </MatlabDebug>
+
+end
+
+% <MatlabDebug>
+endtime = datetime;
+deltatime = endtime - begintime;
+disp(deltatime)
+clear begintime endtime deltatime
+% </MatlabDebug>
+
+% <MatlabDebug>
+clear i gnssidx gnsstimeoutflag gnssupdateflag
+clear input output
+% </MatlabDebug>
+
+% </Subsection>
+
+% </Section>
+
+
+
+%% ----------------------------------------------------------------------------------------------------------------------
+%% 绘图处理 ， 下面的C都不要写
+gps_1 = gps_rcd;
+gps0 = zeros(length(gps_rcd)*10, 10);
+gps000 = zeros(length(gps_rcd)*10, 10);
+k = 0;
+dis = zeros(length(gps_rcd), 3);
+DIS = zeros(length(gps_rcd), 1);
+for i = 1:length(gps_rcd) - 1
+    
+
+    for j = 1:10
+        gps0((i - 1) * 10 + j, :) = gps_rcd(i, :) + (gps_rcd(i + 1, :) - gps_rcd(i, :)) / 10 * (j - 1);
+        if abs((gps_rcd(i + 1, 4) - gps_rcd(i, 4)) / 10) >= 10 / 180 * pi
+            gps0((i - 1) * 10 + j, 4) = gps_rcd(i, 4);
+        end
+    end
+
+end
+gps_rcd = gps0;
+v_erro = zeros(length(gps_rcd), 3);
+p_erro = zeros(length(gps_rcd), 4);
+a_erro = zeros(length(gps_rcd), 1);
+
+p_erro1 = zeros(length(gps_rcd), 4);
+for i = 1:length(gps_rcd)
+    p_erro(i, 1:3) = [(pos_rcd(i, 1) - gps_rcd(i, 1))*6378137, (pos_rcd(i, 2) - gps_rcd(i, 2)) * 6378137 * cos(pos_rcd(1, 1)), pos_rcd(i, 3) - gps_rcd(i, 3)];
+
+    if abs(p_erro(i, 1)) >10000
+        p_erro(i, 1:2) = [0, 0];
+    end
+    p_erro(i, 4) = norm(p_erro(i, 1:2));
+
+
+
+    v_erro(i, :) = vel_rcd(i, :) - gps_rcd(i, 5:7);
+    a_erro(i, 1) = att_rcd(i, 3) - gps_rcd(i, 8);
+    if i > 1 && a_erro(i, 1) > 300 /180 * pi
+        a_erro(i, 1) = a_erro(i, 1) - 2 * pi;
+    elseif a_erro(i, 1) < -300 /180 * pi
+        a_erro(i, 1) = a_erro(i, 1) + 2 * pi;
+    end
+end
+pos_rcd1 = pos_rcd ;
+
+
+%% 绘图
+figure(1)
+subplot(3,1,1), plot(att_rcd(1:end - 100, 1) * 180 / pi); title('俯仰角'); xlabel('更新次数'); ylabel('度');
+subplot(3,1,2), plot(att_rcd(1:end - 100, 2) * 180 / pi); title('横滚角'); xlabel('更新次数'); ylabel('度');
+subplot(3,1,3), plot(att_rcd(1:end - 100, 3) * 180 / pi); title('航向角'); xlabel('更新次数'); ylabel('度');
+
+
+figure(4)
+plot(att_rcd(1:end - 100, 3) * 180 / pi,'b'); hold on;
+plot(gps_rcd(1:end - 100, 8) * 180 / pi, 'r');  hold on;
+plot(gps_rcd(1:end - 100, 4) * 180 / pi, 'g');  hold on;
+title('航向角'); xlabel('更新次数'); ylabel('度');
+legend('组合导航','GNSS')
+
+figure(5)
+subplot(3,1,1), plot(vel_rcd(1:end - 100, 1), 'b'); hold on; plot(gps_rcd(1:end - 100, 5), 'r'); title('东向速度'); xlabel('更新次数'); ylabel('m/s');
+subplot(3,1,2), plot(vel_rcd(1:end - 100, 2), 'b'); hold on; plot(gps_rcd(1:end - 100, 6), 'r'); title('北向速度'); xlabel('更新次数'); ylabel('m/s');
+subplot(3,1,3), plot(vel_rcd(1:end - 100, 3), 'b'); hold on; plot(gps_rcd(1:end - 100, 7), 'r'); title('天相速度'); xlabel('更新次数'); ylabel('m/s');
+legend('组合导航','GNSS')
+
+
+
+figure(6)
+subplot(3,1,1), plot(v_erro(1:end - 100, 1), 'b'); title('东向速度误差'); xlabel('更新次数'); ylabel('m/s');hold on;
+subplot(3,1,2), plot(v_erro(1:end - 100, 2), 'b'); title('北向速度误差'); xlabel('更新次数'); ylabel('m/s');hold on;
+subplot(3,1,3), plot(v_erro(1:end - 100, 3), 'b'); title('天向速度误差'); xlabel('更新次数'); ylabel('m/s');hold on;
+
+figure(7)
+subplot(4,1,1), plot(p_erro(1:end - 100, 1), 'b'); title('纬度误差'); xlabel('更新次数'); ylabel('m');hold on;
+subplot(4,1,2), plot(p_erro(1:end - 100, 2), 'b'); title('经度误差'); xlabel('更新次数'); ylabel('m');hold on;
+subplot(4,1,3), plot(p_erro(1:end - 100, 3), 'b'); title('高度误差'); xlabel('更新次数'); ylabel('m');hold on;
+subplot(4,1,4), plot(p_erro(1:end - 100, 4), 'b'); title('水平误差'); xlabel('更新次数'); ylabel('m');hold on;
+
+figure(8)
+plot(p_erro(1:end - 100, 4), 'b'); title('水平误差'); xlabel('更新次数'); ylabel('m');hold on;
+
+
+
+a4 = find(goe_rcd(:, 2) == 4);
+a5 = find(goe_rcd(:, 2) == 5);
+a1 = find(goe_rcd(:, 2) == 1);
+a2 = find(goe_rcd(:, 2) == 2);
+
+pos_i = find(pos_rcd(:, 1) == 0);
+pos_rcd(pos_i, :) = [];
+% 
+diff_goe_a4 = [ 1; diff(a4)];
+diff_goe_a5 = [ 1; diff(a5)];
+diff_goe_a2 = [ 1; diff(a2)];
+diff_goe_a1 = [ 1; diff(a1)];
+
+a41 = find(diff_goe_a4 > 1);
+a51 = find(diff_goe_a5 > 1);
+a11 = find(diff_goe_a1 > 1);
+a21 = find(diff_goe_a2 > 1);
+
+aaa_rcd1 = gps_1(: , 1 : 4) ;
+aaa1 = [aaa_rcd1(a4(a41, :),:); aaa_rcd1(a5(a51, :),:); aaa_rcd1(a5(a51, :),:); aaa_rcd1(a5(a51, :),:)];
+
+aaa_rcd1(a4(a41, :),:) = nan * ones(length(a41), 4);
+aaa_rcd1(a5(a51, :),:) = nan * ones(length(a51), 4);
+aaa_rcd1(a1(a11, :),:) = nan * ones(length(a11), 4);
+aaa_rcd1(a2(a21, :),:) = nan * ones(length(a21), 4);
+
+
+figure(9)
+plot(aaa_rcd1(a4, 1) * 180 / pi, aaa_rcd1(a4, 2) * 180 / pi, 'r-*'); hold on;
+plot(aaa_rcd1(a5, 1) * 180 / pi, aaa_rcd1(a5, 2) * 180 / pi, 'r-o'); hold on;
+plot(aaa_rcd1(a2, 1) * 180 / pi, aaa_rcd1(a2, 2) * 180 / pi, 'g-*'); hold on;
+plot(aaa_rcd1(a1, 1) * 180 / pi, aaa_rcd1(a1, 2) * 180 / pi, 'g-o'); hold on;
+
+plot(pos_rcd(:, 1) * 180 / pi, pos_rcd(:, 2) * 180 / pi, 'b-'); hold on;
+
+plot(aaa1(:, 1) * 180 / pi, aaa1(:, 2) * 180 / pi, '^'); hold on;
+legend('GNSS-4','GNSS-5','GNSS-2','GNSS-1','组合导航','模式切换处')
+
+if length(gps_rcd) > length(pos_rcd)
+    L = length(pos_rcd) ;
+else
+    L = length(gps_rcd) ;
+end
+figure(20)
+plot((gps_rcd(1 : L , 1) - gps_rcd(1, 1)) * 6378137 , (gps_rcd(1 : L, 2) - gps_rcd(1, 2)) * 6378137  * cos(pos_rcd(1, 1)), 'g-'); hold on;
+plot((pos_rcd(1 : L, 1) - gps_rcd(1, 1)) * 6378137 , (pos_rcd(1 : L, 2) - gps_rcd(1, 2)) * 6378137  * cos(pos_rcd(1, 1)), 'r-'); hold on;
+legend('GNSS','组合导航');
+
+% figure(10)
+% plot3(pos_rcd(1:end - 100, 1), pos_rcd(1:end - 100, 2), pos_rcd(1:end - 100, 3), 'b');
+% hold on;
+% plot3(aaa_rcd(1:end - 100, 1), aaa_rcd(1:end - 100, 2), aaa_rcd(1:end - 100, 3), 'r');
+
+figure(11)
+subplot(3,1,1), plot(pos_rcd1(1:end - 100, 1) * 6378137  - pos_rcd1(1, 1) * 6378137, 'b'); hold on; plot(gps_rcd(1:end - 100, 1) * 6378137  - pos_rcd1(1, 1) * 6378137, 'r'); title('纬度'); xlabel('更新次数'); ylabel('m');
+subplot(3,1,2), plot(pos_rcd1(1:end - 100, 2)  * 6378137 * cos(pos_rcd1(1, 1))- pos_rcd1(1, 2) * 6378137 * cos(pos_rcd1(1, 1)), 'b'); hold on; plot(gps_rcd(1:end - 100, 2) * 6378137 * cos(pos_rcd1(1, 1))- pos_rcd1(1, 2) * 6378137 * cos(pos_rcd1(1, 1)), 'r'); title('经度'); xlabel('更新次数'); ylabel('m');
+subplot(3,1,3), plot(pos_rcd1(1:end - 100, 3), 'b'); hold on; plot(gps_rcd(1:end - 100, 3), 'r'); title('高度'); xlabel('更新次数'); ylabel('m');
+legend('组合导航','GNSS')
+
+
+
+
+% wm = webmap('World Imagery');
+% s = geoshape(gps_rcd(1:end - 100, 1) * 180 / pi, gps_rcd(1:end - 100, 2) * 180 / pi); % lat, lon
+% wmline(s,'Color', 'red', 'Width', 3);
+% hold on;
+% s2 = geoshape(pos_rcd(1:end - 100, 1) * 180 / pi, pos_rcd(1:end - 100, 2) * 180 / pi); % lat, lon
+% wmline(s2,'Color', 'blue', 'Width', 2);

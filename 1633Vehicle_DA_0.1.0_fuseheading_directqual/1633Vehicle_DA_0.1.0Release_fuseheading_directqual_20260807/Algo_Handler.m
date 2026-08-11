@@ -1,0 +1,753 @@
+function [config, generalstatus, initstepstatus, mainstepstatus, output] = Algo_Handler(config, generalstatus, initstepstatus, mainstepstatus, input)
+    %% <Section Name="Input Type Names Definition">
+    coder.cstructname(config, "Algo_Config_Type");
+    coder.cstructname(config.KalmanParams, "Algo_KalmanParams_Type");
+    coder.cstructname(generalstatus, "Algo_GeneralStatus_Type");
+    coder.cstructname(initstepstatus, "Algo_InitStepStatus_Type");
+    coder.cstructname(mainstepstatus, "Algo_MainStepStatus_Type");
+    coder.cstructname(mainstepstatus.DetermineTrackStatus, "Algo_DetermineTrackStatus_Type");
+    coder.cstructname(mainstepstatus.RecalculateGyroBiasStatus, "Algo_RecalculateGyroBiasStatus_Type");
+    coder.cstructname(mainstepstatus.OdoExtParamsCalibStatus, "Algo_OdoExtParamsCalibStatus_Type");
+    coder.cstructname(input, "Algo_Input_Type");
+    % </Section>
+
+
+
+    %% <Section Name="Output Type Definition">
+    output.att = zeros(1, 3);
+    output.att_ins = zeros(1, 3);
+    output.dong_jing_tai = zeros(1, 1, "int32");
+    output.imu = zeros(1, 23);
+    output.gps = zeros(1, 10);
+    output.goe = zeros(1, 9);
+    output.P_fil = zeros(1, 18);
+    output.pos = zeros(1, 3);
+    output.vel = zeros(1, 3);
+    output.v_ins = zeros(1, 3);
+    output.X_fil = zeros(1, 18);
+    output.fnn = zeros(1, 3);
+    output.fbb = zeros(1, 3);
+    output.velocity = zeros(1, 1);
+    output.track_angle = zeros(1, 1);
+    output.vel_body = zeros(1, 3);
+    output.updateflags_att = false;
+    output.updateflags_att_ins = false;
+    output.updateflags_dong_jing_tai = false;
+    output.updateflags_goe = false;
+    output.updateflags_gps = false;
+    output.updateflags_imu = false;
+    output.updateflags_P_fil = false;
+    output.updateflags_pos = false;
+    output.updateflags_vel = false;
+    output.updateflags_v_ins = false;
+    output.updateflags_X_fil = false;
+    output.StepChangeFlag = false;
+    output.ConfigUpdateFlag = false;
+    coder.cstructname(output, "Algo_Output_Type");
+    % </Section>
+
+
+
+    %% <Section Name="General Operations">
+    if generalstatus.counterimu < intmax("int32")
+        generalstatus.counterimu = generalstatus.counterimu+int32(1);
+    end
+    
+    
+    
+    tempsensorvaluetab.imu = zeros(1, 23);
+    tempsensorvaluetab.gps = zeros(1, 10);
+    tempsensorvaluetab.goe = zeros(1, 9);
+    tempsensorvaluetab.goe12 = zeros(1, 2, "int32");
+    tempsensorvaluetab.gnssupdateflag = false;
+    tempsensorvaluetab.gnsstimeoutflag = false;
+    coder.cstructname(tempsensorvaluetab, "Algo_TempSensorValueTab_Type");
+
+    tempsensorvaluetab.gnssupdateflag = input.updateflags_gnss;
+    tempsensorvaluetab.gnsstimeoutflag = input.gnsstimeoutflag;
+
+    tempsensorvaluetab.imu = Preprocess_imu(input.imu);
+    output.imu = tempsensorvaluetab.imu;
+    output.updateflags_imu = true;
+    imuinput456 = tempsensorvaluetab.imu(4:6);
+
+    if tempsensorvaluetab.imu(7) == 0  % 临时的imu(7)----imu12eq0cnt ，后面改
+        if generalstatus.imu12eq0cnt < intmax("int32")
+            generalstatus.imu12eq0cnt = generalstatus.imu12eq0cnt + int32(1);
+        end
+    else
+        generalstatus.imu12eq0cnt = int32(0);
+    end
+    if tempsensorvaluetab.imu(7) == 0   % 临时的imu(7)----imu14eq0cnt ，后面改
+        if generalstatus.imu14eq0cnt < intmax("int32")
+            generalstatus.imu14eq0cnt = generalstatus.imu14eq0cnt + int32(1);
+        end
+    else
+        generalstatus.imu14eq0cnt = int32(0);
+    end
+    if generalstatus.counterimu >= 50
+        if (generalstatus.imu12eq0cnt < 50) && (generalstatus.imu14eq0cnt < 50) 
+            generalstatus.Value_odo_flag = int32(0);                 % 里程计
+        else
+            generalstatus.Value_odo_flag = int32(0);
+        end
+    end
+    
+    
+    
+    if input.updateflags_gnss
+        [tempsensorvaluetab.gps, tempsensorvaluetab.goe, generalstatus.FirstInit_Flag, generalstatus.Gps123_Prv] = Preprocess_gnss(config.Heading_Comp, input.gnss, generalstatus.FirstInit_Flag, generalstatus.Gps123_Prv);
+        tempsensorvaluetab.goe12 = int32(tempsensorvaluetab.goe(1 : 2)) ;
+        output.gps = tempsensorvaluetab.gps;
+        output.goe = tempsensorvaluetab.goe;
+        output.updateflags_goe = true;
+        output.updateflags_gps = true;
+
+        if tempsensorvaluetab.gps(4) ~= 0 
+            tempsensorvaluetab.gps(4) = tempsensorvaluetab.gps(4) + config.d_yaw_v2b ;
+            tempsensorvaluetab.gps(8) = tempsensorvaluetab.gps(8) + config.d_yaw_v2b ;
+
+            if tempsensorvaluetab.gps(8) > 2 * pi
+                tempsensorvaluetab.gps(8) = tempsensorvaluetab.gps(8) - 2 * pi ;
+            elseif tempsensorvaluetab.gps(8) < 0
+                tempsensorvaluetab.gps(8) = tempsensorvaluetab.gps(8) + 2 * pi ;
+            end
+
+            if tempsensorvaluetab.gps(4) > 2 * pi
+                tempsensorvaluetab.gps(4) = tempsensorvaluetab.gps(4) - 2 * pi ;
+            elseif tempsensorvaluetab.gps(4) < 0
+                tempsensorvaluetab.gps(4) = tempsensorvaluetab.gps(4) + 2 * pi ;
+            end
+
+            output.gps([4, 8]) = tempsensorvaluetab.gps([4, 8]);
+            output.updateflags_gps = true;
+        end
+        
+        tempsensorvaluetab.goe(8) = norm(tempsensorvaluetab.goe(5:6));
+        output.goe(8) = tempsensorvaluetab.goe(8);
+        output.updateflags_goe = true;
+        
+        
+        
+        generalstatus.gps_latest = tempsensorvaluetab.gps;
+        generalstatus.goe_latest = tempsensorvaluetab.goe;
+        generalstatus.goe12_latest = tempsensorvaluetab.goe12 ;
+    end
+    
+	% </Section>
+
+
+
+    %% <Section Name="Main Operations">
+    switch generalstatus.Step
+        case Algo_Step_Type.ALGO_STEP_INIT
+
+            [generalstatus, initstepstatus, output] = Algo_Handler_InitStep(config, generalstatus, initstepstatus, tempsensorvaluetab, output);
+
+            if initstepstatus.initflags_part1 && ...
+                    initstepstatus.initflags_part3 && ...
+                    initstepstatus.initflags_part4 && ...
+                    initstepstatus.initflags_part5 && ...
+                    initstepstatus.initflags_part6
+
+                generalstatus.Step = Algo_Step_Type.ALGO_STEP_MAIN;
+                generalstatus.StepInitFlag = true;
+                output.StepChangeFlag = true;
+                
+            end
+
+        case Algo_Step_Type.ALGO_STEP_MAIN
+
+            % <Section> Main Step Begin
+            if generalstatus.StepInitFlag
+                generalstatus.StepInitFlag = false;
+                mainstepstatus.before_att = generalstatus.att;
+                mainstepstatus.before_pos = generalstatus.pos;
+            end
+            % </Section>
+            
+            if generalstatus.ExtParamsCalib_TrgFlag
+                generalstatus.ExtParamsCalib_TrgFlag = false;
+        
+                mainstepstatus.OdoExtParamsCalibStatus.i_Xfilter_odo_angle_k = int32(0);
+        
+                mainstepstatus.OdoExtParamsCalibStatus.ExtParamsCalib_RunningFlag = true;
+            end
+            
+            if mainstepstatus.counterimu < intmax("int32")
+                mainstepstatus.counterimu = mainstepstatus.counterimu+int32(1);
+            end
+            if input.updateflags_gnss
+                if mainstepstatus.countergnss < intmax("int32")
+                    mainstepstatus.countergnss = mainstepstatus.countergnss+int32(1);
+                end
+            end
+            
+            %判断航迹准不准
+            [mainstepstatus.DetermineTrackStatus, yaw_correct1] = DetermineTrack(mainstepstatus.DetermineTrackStatus , tempsensorvaluetab);
+
+
+            if tempsensorvaluetab.gnssupdateflag
+                if mainstepstatus.countergnss > 1 && tempsensorvaluetab.gps(10) == mainstepstatus.gps10_prv  % 0-gnss航向角有问题，1-没问题---两拍航向一样（不准的标志）
+                    yaw_correct = int32(0);
+                else
+                    yaw_correct = int32(1);
+                end
+            else
+                yaw_correct = int32(1);
+            end
+
+
+
+            imu6sbw_mean = mainstepstatus.imu6_2_sum / 6 - generalstatus.bw(3);
+            if tempsensorvaluetab.gnssupdateflag
+                if mainstepstatus.countergnss > 1 && tempsensorvaluetab.gps(9) > 5 ...
+                        && abs(imu6sbw_mean) < 0.05 ...
+                        && tempsensorvaluetab.goe(3) <= 1 ...
+                        && yaw_correct ~= 0  ...
+                        && mainstepstatus.k_diff_gps_yaw < 500  ...
+                        && abs(tempsensorvaluetab.imu(6) - generalstatus.bw(3)) < 0.02 ...
+                        && ((tempsensorvaluetab.goe12(2) == 5 && (tempsensorvaluetab.goe(8) < 0.15 && tempsensorvaluetab.goe(8) ~= 0)) ...
+                        || ( tempsensorvaluetab.goe12(2) == 4 && (tempsensorvaluetab.goe(8) < 0.08 && tempsensorvaluetab.goe(8) ~= 0)) ...
+                        || ( tempsensorvaluetab.goe12(2) == 2 && (tempsensorvaluetab.goe(8) < 1    && tempsensorvaluetab.goe(8) ~= 0)) ...
+                        || ( tempsensorvaluetab.goe12(2) == 1 && (tempsensorvaluetab.goe(8) < 4    && tempsensorvaluetab.goe(8) ~= 0)))
+
+                    tmp_diff_gpsyaw = tempsensorvaluetab.gps(8) - tempsensorvaluetab.gps(4);
+                    if abs(tmp_diff_gpsyaw) <= deg2rad(5) || mainstepstatus.k_diff_gps_yaw <= 1
+                        mainstepstatus.k_diff_gps_yaw = mainstepstatus.k_diff_gps_yaw + int32(1);
+                        mainstepstatus.diff_gpsyaw_sum = mainstepstatus.diff_gpsyaw_sum + tmp_diff_gpsyaw;
+                    end
+                end
+            end
+            if (mainstepstatus.k_diff_gps_yaw == 500 && mainstepstatus.k_xita == 1)
+                diff_gpsyaw_mean = mainstepstatus.diff_gpsyaw_sum / 500;
+                mainstepstatus.xita_yaw = diff_gpsyaw_mean;
+                mainstepstatus.k_xita = int32(0);  % 偏差角找到后只初始化一次
+
+                output.att = mat2a(generalstatus.cbn) ;
+                output.att(3) = output.att(3) + mainstepstatus.xita_yaw ;
+                if output.att(3) > 2 * pi
+                    output.att(3) = output.att(3) - 2 * pi;
+                elseif output.att(3) < 0
+                    output.att(3) = output.att(3) + 2 * pi;
+                end
+                [generalstatus.q, generalstatus.cbn] = att2cbn_q(output.att(3) , output.att) ;
+
+
+
+            end
+
+            if mainstepstatus.k_diff_gps_yaw == 500 && input.updateflags_gnss
+                if tempsensorvaluetab.gps(4) ~= 0
+                    tempsensorvaluetab.gps(4) = tempsensorvaluetab.gps(4) + mainstepstatus.xita_yaw;  % 航向角---双天线有   + deg2rad(0) 表示航向安装偏差角修正
+                    output.gps(4) = tempsensorvaluetab.gps(4);
+                    output.updateflags_gps = true;
+                end
+
+                if tempsensorvaluetab.gps(4) > 2 * pi
+                    tempsensorvaluetab.gps(4) = tempsensorvaluetab.gps(4) - 2 * pi;
+                    output.gps(4) = tempsensorvaluetab.gps(4);
+                    output.updateflags_gps = true;
+                elseif tempsensorvaluetab.gps(4) < 0
+                    tempsensorvaluetab.gps(4) = tempsensorvaluetab.gps(4) + 2 * pi;
+                    output.gps(4) = tempsensorvaluetab.gps(4);
+                    output.updateflags_gps = true;
+                end
+
+            end
+
+            %% 动静态判断
+            mainstepstatus.imu456sbwabsmax_rcd(mainstepstatus.imu456sbwabsmax_idx) = max(abs(tempsensorvaluetab.imu(4 : 6) - generalstatus.bw));
+            mainstepstatus.imu456sbwabsmax_idx = mod(mainstepstatus.imu456sbwabsmax_idx, int32(size(mainstepstatus.imu456sbwabsmax_rcd, 1))) + int32(1);
+
+            if input.updateflags_gnss
+                if tempsensorvaluetab.gps(9) < 0.01
+                    if mainstepstatus.gps9lt0p01_cnt < int32(20)
+                        mainstepstatus.gps9lt0p01_cnt = mainstepstatus.gps9lt0p01_cnt + int32(1);
+                    end
+                else
+                    mainstepstatus.gps9lt0p01_cnt = int32(0);
+                end
+                if tempsensorvaluetab.goe(8) ~= 0
+                    if mainstepstatus.goe8neq0_cnt < int32(20)
+                        mainstepstatus.goe8neq0_cnt = mainstepstatus.goe8neq0_cnt + int32(1);
+                    end
+                else
+                    mainstepstatus.goe8neq0_cnt = int32(0);
+                end
+                if tempsensorvaluetab.goe(8) < 5
+                    if mainstepstatus.goe8lt5_cnt < int32(20)
+                        mainstepstatus.goe8lt5_cnt = mainstepstatus.goe8lt5_cnt + int32(1);
+                    end
+                else
+                    mainstepstatus.goe8lt5_cnt = int32(0);
+                end
+
+                % if tempsensorvaluetab.goe12(2) == 1 || tempsensorvaluetab.goe12(2) == 2
+                if tempsensorvaluetab.gps(9) < 0.1
+                    if mainstepstatus.gps9lt0p1_cnt < int32(20)
+                        mainstepstatus.gps9lt0p1_cnt = mainstepstatus.gps9lt0p1_cnt + int32(1);
+                    end
+                else
+                    mainstepstatus.gps9lt0p1_cnt = int32(0);
+                end
+
+                if tempsensorvaluetab.gps(9) > 0
+                    if mainstepstatus.gps9gt0_cnt < int32(20)
+                        mainstepstatus.gps9gt0_cnt = mainstepstatus.gps9gt0_cnt + int32(1);
+                    end
+                else
+                    mainstepstatus.gps9gt0_cnt = int32(0);
+                end
+            end
+
+            %% 动静态判断
+            if generalstatus.Value_odo_flag == int32(1)
+
+                [generalstatus.flag1, output.dong_jing_tai] = Dynamic_and_static_state_odo(generalstatus.flag1, tempsensorvaluetab.imu); %动静态标志位 ，里程计判断的
+                output.updateflags_dong_jing_tai = true;
+
+                if generalstatus.flag1 == 0 && generalstatus.gps_latest(9) > 0.1 && generalstatus.goe_latest(3) <= 1 || (abs(norm(tempsensorvaluetab.imu(1 : 3)) - 1) > 0.02 || norm(tempsensorvaluetab.imu(4 : 6) - generalstatus.bw) > 5e-3)
+                    generalstatus.flag1 = int32(1);
+                    output.dong_jing_tai = int32(1) ;
+                    output.updateflags_dong_jing_tai = true;
+                end
+
+            else
+                if mainstepstatus.counterimu > int32(20)
+
+                    x1 = (1:1:11)';
+                    mainstepstatus.y1(end) = sqrt(sum(tempsensorvaluetab.imu(4:6) .* tempsensorvaluetab.imu(4:6)));
+                    p1 = abs(polyfit(x1, mainstepstatus.y1, 2));  % 一元二次方程拟合
+
+                else
+
+                    p1 = [0, 0, 0];
+
+                end
+
+                [generalstatus.flag1, output.dong_jing_tai, mainstepstatus.k0] = Dynamic_and_static_state_imu(generalstatus.flag1, tempsensorvaluetab.imu, mainstepstatus.k0, generalstatus.bw, generalstatus.xita, p1, generalstatus.p1111); %动静态标志位 ，imu判断的
+                output.updateflags_dong_jing_tai = true;
+
+
+                %%------ 1   没有里程计时，动静态判断有点差别
+
+                if mainstepstatus.counterimu > 20 && generalstatus.flag1 == 0 ...
+                        && ( generalstatus.gps_latest(9) > 0.1 ...
+                        ||   max(mainstepstatus.imu456sbwabsmax_rcd) > 4e-3)
+                    generalstatus.flag1 = int32(1) ;
+                    output.dong_jing_tai = int32(1) ;
+                    output.updateflags_dong_jing_tai = true;
+                    mainstepstatus.k0 = int32(0) ;
+                end
+
+                %%----- 2   没有里程计时，动静态判断有点差别
+                if mainstepstatus.counterimu > 200 && generalstatus.flag1 == 1
+                    if generalstatus.goe12_latest(2) == 1 || generalstatus.goe12_latest(2) == 2 || (generalstatus.goe12_latest(2) == 4 && generalstatus.goe_latest(8) > 0.15) 
+                        if mainstepstatus.gps9lt0p1_cnt >= int32(20) && mainstepstatus.gps9gt0_cnt >= int32(20)
+                            generalstatus.flag1 = int32(0) ;
+                            output.dong_jing_tai = int32(0) ;
+                            output.updateflags_dong_jing_tai = true;
+                            mainstepstatus.k0 = int32(0) ;
+                        end
+                    else
+                        if  mainstepstatus.gps9lt0p01_cnt >= int32(20)  && mainstepstatus.goe8neq0_cnt >= int32(20) && mainstepstatus.goe8lt5_cnt >= int32(20)
+                            generalstatus.flag1 = int32(0) ;
+                            output.dong_jing_tai = int32(0) ;
+                            output.updateflags_dong_jing_tai = true;
+                            mainstepstatus.k0 = int32(0) ;
+                        end
+                    end
+                end
+
+                %%----- 3   没有里程计时，动静态判断有点差别
+                elemnum = int32(size(mainstepstatus.imu456_rcd, 1) * size(mainstepstatus.imu456_rcd, 2));
+                groupelemidx = int32(mod(mainstepstatus.imu456_idx - int32(1), size(mainstepstatus.imu456_rcd, 1))) + int32(1);
+                groupidx = int32((mainstepstatus.imu456_idx - groupelemidx) / size(mainstepstatus.imu456_rcd, 1)) + int32(1);
+                mainstepstatus.imu456_rcd(groupelemidx, groupidx, : ) = tempsensorvaluetab.imu(4: 6) - generalstatus.bw;
+                mainstepstatus.imu456_idx = mod(mainstepstatus.imu456_idx, elemnum) + int32(1);
+                mainstepstatus.imu456_groupmax(1, groupidx, : ) = max(mainstepstatus.imu456_rcd( : , groupidx, : ));
+                mainstepstatus.imu456_groupmin(1, groupidx, : ) = min(mainstepstatus.imu456_rcd( : , groupidx, : ));
+                imu456_max = max(mainstepstatus.imu456_groupmax, [], 2);
+                imu456_min = min(mainstepstatus.imu456_groupmin, [], 2);
+
+                if mainstepstatus.counterimu > 100 ...
+                        && generalstatus.flag1 == 1 ...
+                        && (imu456_max(3) - imu456_min(3)) < 0.001 ...
+                        && (imu456_max(2) - imu456_min(2)) < 0.001 ...
+                        && (imu456_max(1) - imu456_min(1)) < 0.001 ...
+                        && (imu456_max(3) * imu456_min(3)) < 0 ...
+                        && (imu456_max(2) * imu456_min(2)) < 0 ...
+                        && (imu456_max(1) * imu456_min(1)) < 0                %4,5,8
+                    generalstatus.flag1 = int32(0) ;
+                    output.dong_jing_tai = int32(0) ;
+                    output.updateflags_dong_jing_tai = true;
+                    mainstepstatus.k0 = int32(0) ;
+                end
+            end
+
+            if output.dong_jing_tai == int32(0)
+                if mainstepstatus.dong_jing_taieq0cnt < intmax("int32")
+                    mainstepstatus.dong_jing_taieq0cnt = mainstepstatus.dong_jing_taieq0cnt + int32(1);
+                end
+            else
+                mainstepstatus.dong_jing_taieq0cnt = int32(0);
+            end
+
+            %% 当里程计故障---这里需要补加动静态判断
+            %%
+            % if generalstatus.flag1 == int32(0) && tempsensorvaluetab.gnsstimeoutflag 
+            %     tempsensorvaluetab.imu(4 : 6) = generalstatus.bw + mainstepstatus.x_filter(10 : 12)';
+            % end
+            tempsensorvaluetab.imu(4 : 6) = tempsensorvaluetab.imu(4 : 6) - [mainstepstatus.x_filter(10 : 11) ; mainstepstatus.x_filter(12)]';
+            tempsensorvaluetab.imu(1 : 3) = tempsensorvaluetab.imu(1 : 3) - [mainstepstatus.x_filter(13 : 14) ; mainstepstatus.x_filter(15)]' / 9.794362833435068;
+            [rm, rn, tempsensorvaluetab.imu(1:6), generalstatus.q, generalstatus.cbn, g, fn, output.vel, output.v_ins, output.att_ins, output.att, output.pos, wnbb, output.fnn] =  Move_heading_success1(tempsensorvaluetab.imu(1:6), Consts.e, Consts.re, Consts.wie, mainstepstatus.before_pos, mainstepstatus.before_vel, Consts.g0, generalstatus.q, Consts.t, generalstatus.bw, generalstatus.cbn , generalstatus.flag1);
+
+            output.fbb = (generalstatus.cbn' * output.fnn')' ;
+            %% 初始航向角修正
+            if mainstepstatus.initial_heading_correct_flag == false
+
+                if yaw_correct == 1 && input.updateflags_gnss && tempsensorvaluetab.goe(8) > 0 && tempsensorvaluetab.gps(4) > 1e-6 ...
+                        && (tempsensorvaluetab.goe12(2) == 4 && tempsensorvaluetab.goe(8) < 0.10 || tempsensorvaluetab.goe12(2) == 1 && tempsensorvaluetab.goe(8) < 3) ...
+                        && (abs(tempsensorvaluetab.gps(4) - output.att(3)) < deg2rad(8) || abs(tempsensorvaluetab.gps(4) - output.att(3)) > deg2rad(352))
+                    mainstepstatus.initial_heading_correct_flag = true ; % 不需要修正，退出
+                end
+
+                if yaw_correct == 1 && input.updateflags_gnss && tempsensorvaluetab.goe(8) > 0 && tempsensorvaluetab.gps(4) > 1e-6 ...
+                        && (tempsensorvaluetab.goe12(2) == 4 && tempsensorvaluetab.goe(8) < 0.10 || tempsensorvaluetab.goe12(2) == 1 && tempsensorvaluetab.goe(8) < 3) ...
+                        && abs(tempsensorvaluetab.gps(4) - output.att(3)) > deg2rad(8) ...
+                        && abs(tempsensorvaluetab.gps(4) - output.att(3)) < deg2rad(352) ...
+                        && tempsensorvaluetab.goe12(1) / mainstepstatus.k1 >= 12
+
+                    output.att(3) = tempsensorvaluetab.gps(4) ;
+                    [generalstatus.q, generalstatus.cbn, output.vel, output.pos, mainstepstatus.x_filter, mainstepstatus.p_filter] = ins_correct(output.att , tempsensorvaluetab.gps) ;
+                    mainstepstatus.initial_heading_correct_flag = true ;
+                end
+            end
+
+            output.imu(1:6) = tempsensorvaluetab.imu(1:6);
+            output.updateflags_imu = true;
+            output.updateflags_vel = true;
+            output.updateflags_v_ins = true;
+            output.updateflags_att_ins = true;
+            output.updateflags_att = true;
+            output.updateflags_pos = true;
+
+            %% 没有里程计时，俯仰安装偏角补偿
+            if mainstepstatus.counterimu > 60000 && input.updateflags_gnss && tempsensorvaluetab.goe(8) > 0 ...
+                    && (tempsensorvaluetab.goe12(2) == 4 && tempsensorvaluetab.goe(8) < 0.15 || tempsensorvaluetab.goe12(2) == 1 && tempsensorvaluetab.goe(8) < 4 / mainstepstatus.k1) ...
+                    && generalstatus.Value_odo_flag == 0 && mainstepstatus.k_pitch_deviation < 1000 ...
+                    && norm(output.vel(1 : 2)) > 10 ...
+                    &&  abs(tempsensorvaluetab.gps(7) - output.vel(3)) <= 0.3
+                
+
+                mainstepstatus.k_pitch_deviation = mainstepstatus.k_pitch_deviation + 1 ;
+                mainstepstatus.sum_pitch_deviation = mainstepstatus.sum_pitch_deviation + output.vel(3) / norm(output.vel(1 : 2)) - output.att(1) ;
+
+                
+                if  mainstepstatus.k_pitch_deviation == 1000 
+                    config.cvb_nhc(2 , 3) = -mainstepstatus.sum_pitch_deviation / 1000 ;
+                    config.cvb_nhc(3 , 2) =  mainstepstatus.sum_pitch_deviation / 1000 ;
+                else
+                    config.cvb_nhc(2 , 3) = 0 ;
+                    config.cvb_nhc(3 , 2) = 0 ;
+                end
+
+            end
+            
+
+
+
+            %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%---kalman滤波---%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            kalman.yaw_correct = yaw_correct;
+            kalman.yaw_correct1 = yaw_correct1;  %zhoucheng
+
+            kalman.att = output.att;   % 结构体
+            kalman.vel = output.vel;
+            kalman.pos = output.pos;
+            kalman.rn = rn;
+            kalman.rm = rm;
+            kalman.cbn = generalstatus.cbn;
+            kalman.fn = fn;
+            kalman.fb = tempsensorvaluetab.imu(1:3)' * 9.794362833435068;
+            kalman.wibb = wnbb';
+            kalman.q = generalstatus.q;
+            kalman.g = g;
+            kalman.gnssupdateflag = input.updateflags_gnss;
+            kalman.gnsstimeoutflag = input.gnsstimeoutflag;
+            kalman.flag1 = generalstatus.flag1;
+            kalman.imu = tempsensorvaluetab.imu(1 : 6);
+            kalman.odo_start = tempsensorvaluetab.imu(7);   % 里程计后轮输出标志位
+            kalman.cvbn = generalstatus.cbn * config.cvb;
+            kalman.cvbn_nhc = generalstatus.cbn * config.cvb_nhc;
+            kalman.Value_odo_flag = generalstatus.Value_odo_flag ;
+
+            if mainstepstatus.OdoExtParamsCalibStatus.ExtParamsCalib_RunningFlag
+                flag_heading_fusion = int32(1);     %0暂都设1
+            else
+                flag_heading_fusion = int32(1);     %都设1
+            end
+            kalman.flag_heading_fusion = flag_heading_fusion ;
+
+            kalman.before_att = mainstepstatus.before_att;
+            if mainstepstatus.k1 == int32(1)
+                if input.updateflags_gnss && tempsensorvaluetab.goe12(2) > 1
+                    mainstepstatus.k1 = int32(2);
+                end
+            end
+            kalman.k1 = mainstepstatus.k1;
+
+            kalman.z = zeros(1, 9);
+            %% 组合导航数据融合---kalman滤波
+            kalman.goe = generalstatus.goe_latest;
+            kalman.goe12= generalstatus.goe12_latest;
+            kalman.odo_vy = zeros(1, 1);
+
+
+
+
+            %% 航向角变化率及惯导加速度
+            imu6_mean = (mainstepstatus.imu6_1_sum + tempsensorvaluetab.imu(6)) / (size(mainstepstatus.imu6_1_rcd, 1) + 1);
+            if mainstepstatus.counterimu <= int32(6)
+                mainstepstatus.an = [0, 0, 0];     % 加速度粗略估算
+                yaw_rate = 0;          % 向角变化率
+            else
+                if ~input.updateflags_gnss
+                    mainstepstatus.an = (output.v_ins - mainstepstatus.before_vel) / Consts.t;
+                end
+                yaw_rate = - imu6_mean;
+            end
+
+            if mainstepstatus.imu6_2_idx < int32(size(mainstepstatus.imu6_2_rcd, 1))
+                mainstepstatus.imu6_2_sum = mainstepstatus.imu6_2_sum - mainstepstatus.imu6_2_rcd(mainstepstatus.imu6_2_idx);
+                mainstepstatus.imu6_2_rcd(mainstepstatus.imu6_2_idx) = tempsensorvaluetab.imu(6);
+                mainstepstatus.imu6_2_idx = mod(mainstepstatus.imu6_2_idx, size(mainstepstatus.imu6_2_rcd, 1)) + int32(1);
+                mainstepstatus.imu6_2_sum = mainstepstatus.imu6_2_sum + tempsensorvaluetab.imu(6);
+                mainstepstatus.imu6_2_sum_recalc = mainstepstatus.imu6_2_sum_recalc + tempsensorvaluetab.imu(6);
+            else
+                mainstepstatus.imu6_2_sum = mainstepstatus.imu6_2_sum_recalc + tempsensorvaluetab.imu(6);
+                mainstepstatus.imu6_2_rcd(mainstepstatus.imu6_2_idx) = tempsensorvaluetab.imu(6);
+                mainstepstatus.imu6_2_idx = int32(1);
+                mainstepstatus.imu6_2_sum_recalc = 0;
+            end
+
+            kalman.yaw_rate = yaw_rate;
+            kalman.an = mainstepstatus.an';
+
+            generalstatus.Mpv = [0, 1 / rm, 0;     1 / (rn * cos(kalman.pos(1))), 0, 0;     0, 0, 1];
+            webb = [0, -kalman.wibb(3), kalman.wibb(2);     kalman.wibb(3), 0, -kalman.wibb(1);     -kalman.wibb(2), kalman.wibb(1), 0];
+
+
+
+            %% GNSS杆臂补偿、延时补偿
+            if input.updateflags_gnss
+                if mainstepstatus.counterimu >= int32(22)
+                    Yaw_rate1_mean = -mainstepstatus.imu6_2_sum / size(mainstepstatus.imu6_2_rcd, 1);
+                else
+                    Yaw_rate1_mean = 0;
+                end
+                
+                if output.goe(2) ~= 0
+                    tempsensorvaluetab.gps = Lever_arm_GNSS_delay(tempsensorvaluetab.gps, generalstatus.Mpv, webb, output.vel, Yaw_rate1_mean, yaw_rate, mainstepstatus.counterimu, generalstatus.cbn, config.Lever_Arm_GNSS, mainstepstatus.an);
+                end
+                
+                output.gps = tempsensorvaluetab.gps;
+                output.updateflags_gps = true;
+                kalman.z = tempsensorvaluetab.gps(1:9);
+            end
+
+
+
+            %% 里程计速度转化到n系
+            if mainstepstatus.counterimu >= int32(1)  % 里程计前进后退标志位死区
+                if tempsensorvaluetab.imu(8) == 0
+                    tempsensorvaluetab.imu(8) = mainstepstatus.befor_imu8 ;
+                end
+                if tempsensorvaluetab.imu(9) == 0
+                    tempsensorvaluetab.imu(9) = mainstepstatus.befor_imu9 ;
+                end
+            end
+            mainstepstatus.befor_imu8 = tempsensorvaluetab.imu(8) ;
+            mainstepstatus.befor_imu9 = tempsensorvaluetab.imu(9) ;
+
+            [v_odo1, vodo_behind] = Odometer_speed(tempsensorvaluetab.imu, config.k0001, config.k0002, generalstatus.cbn, config.cvb);
+
+            kalman.odo_vy = vodo_behind;
+
+
+            %% 组合导航数据融合---kalman滤波
+            [mainstepstatus.x_filter, mainstepstatus.p_filter] = Kalman_Filter(mainstepstatus.x_filter, mainstepstatus.p_filter, kalman, v_odo1, ...
+                generalstatus.Value_odo_flag, config.KalmanParams, config.Lever_Arm_ODO , config.Lever_Arm_NHC);
+
+            output.X_fil = mainstepstatus.x_filter'; % 状态存储，调试用 ，C可不写
+            output.P_fil = diag(mainstepstatus.p_filter)';
+            output.updateflags_X_fil = true;
+            output.updateflags_P_fil = true;
+
+
+            %% kalman状态量反馈补偿
+
+            [output.att, output.vel, output.pos, generalstatus.cbn, generalstatus.q] = Correct(output.att, output.vel, output.pos, mainstepstatus.x_filter, generalstatus.q);  % 姿态，速度，位置，滤波状态，四元数，航向角变化率
+            output.updateflags_att = true;
+            output.updateflags_vel = true;
+            output.updateflags_pos = true;
+
+            mainstepstatus.x_filter(1:9) = 0;  %状态置0 ， 状态补偿那完成后，状态置0
+
+             %% 重新初始化，避免长时间发散回不来
+            if yaw_correct == 1 && input.updateflags_gnss && (tempsensorvaluetab.goe12(2) == 4 && tempsensorvaluetab.goe(8) < 0.15 || tempsensorvaluetab.goe12(2) == 1 && tempsensorvaluetab.goe(8) < 3) && tempsensorvaluetab.gps(4) > 1e-6
+                if tempsensorvaluetab.goe(8) > 0 && abs(tempsensorvaluetab.gps(4) - output.att(3)) > deg2rad(10) && abs(tempsensorvaluetab.gps(4) - output.att(3)) < deg2rad(350) ...
+                        || norm(output.pos(1 : 2) - tempsensorvaluetab.gps(1 : 2)) > 10 / Consts.re ...
+                        || max(abs(tempsensorvaluetab.imu(1 : 2))) < 0.3 && tempsensorvaluetab.imu(3) < 1.2 && abs(max(output.att(1 : 2))) > deg2rad(45)
+                    mainstepstatus.ins_wrong_cnt = mainstepstatus.ins_wrong_cnt + int32(1) ;
+
+                    if mainstepstatus.ins_wrong_cnt > 20 * 30  %连续0.5分钟错误
+                        if max(abs(tempsensorvaluetab.imu(1 : 2))) < 0.3 && tempsensorvaluetab.imu(3) < 1.2 && abs(max(output.att(1 : 2))) > deg2rad(45)
+                            output.att(1 : 2) = [0 , 0] ;
+                        end
+                        output.att(3) = tempsensorvaluetab.gps(4) ;
+                        [generalstatus.q, generalstatus.cbn, output.vel, output.pos, mainstepstatus.x_filter, mainstepstatus.p_filter] = ins_correct(output.att , tempsensorvaluetab.gps) ;
+                        mainstepstatus.ins_wrong_cnt = int32(0) ;
+                    end
+                else
+                    mainstepstatus.ins_wrong_cnt = int32(0) ;
+                end
+            end
+
+            %% 避免长时间发散超限值
+            if abs(output.pos(3)) > 8000000 || norm(output.vel) > 30000 
+                output.pos = mainstepstatus.before_pos ;
+                output.vel = mainstepstatus.before_vel ;
+
+                mainstepstatus.x_filter = zeros(18 , 1) ;
+                mainstepstatus.p_filter = diag([[1 , 1 , 1] * 0.01 *  pi / 180 , [0.1 , 0.1 , 0.1] * 1, [0.1 / Consts.re , 0.1 / Consts.re , 0.1] * 1 ,...
+                    [1 , 1 , 10] / 57 / 3600 * 1 , [1e-3 , 1e-3 , 1e-3 ] * 0.1, [50/57 , 10 , 30/57 ] * 1e-1])^2 ; %误差方差
+
+                if yaw_correct == 1 && input.updateflags_gnss && (tempsensorvaluetab.goe12(2) == 4 && tempsensorvaluetab.goe(8) < 0.15 || tempsensorvaluetab.goe12(2) == 1 && tempsensorvaluetab.goe(8) < 3) && tempsensorvaluetab.gps(4) > 1e-6
+                    if abs(tempsensorvaluetab.imu(3)) < 1e-6
+                        if tempsensorvaluetab.imu(3) == 0
+                            tempsensorvaluetab.imu(3) = 1e-6 ;
+                        end
+                        tempsensorvaluetab.imu(3) = tempsensorvaluetab.imu(3) / abs(tempsensorvaluetab.imu(3)) * 1e-6 ;
+                    end
+                    att_acc = [asin(tempsensorvaluetab.imu(2)) , atan(-tempsensorvaluetab.imu(1) / tempsensorvaluetab.imu(3))] ;
+                    if abs(output.att(1) - att_acc(1)) > deg2rad(30)
+                        output.att(1) = att_acc(1) ;
+                    end
+                    if abs(output.att(2) - att_acc(2)) > deg2rad(30)
+                        output.att(2) = att_acc(2) ;
+                    end
+                    output.att(3) = tempsensorvaluetab.gps(4) ;
+                    [generalstatus.q, generalstatus.cbn, output.vel, output.pos, mainstepstatus.x_filter, mainstepstatus.p_filter] = ins_correct(output.att , tempsensorvaluetab.gps) ;
+                end
+            end
+            output.velocity = norm(output.vel) ; %和速度
+            if abs(output.vel(2)) < 1e-6
+                output.vel(2) = 1e-6 ;
+            end
+            output.track_angle = rad2deg(atan2(output.vel(1) , output.vel(2))) + 360 ;
+            % if abs(output.vel(2)) < 1e-2 && abs(output.vel(1)) < 1e-2 
+            %     output.track_angle = rad2deg(output.att(3)) ;
+            % end
+            if output.track_angle > 360
+                output.track_angle = output.track_angle - 360 ; %航迹角
+            end
+            output.vel_body = (generalstatus.cbn' * output.vel')' ;
+
+
+            %% 安装偏角 && 里程计剩余刻度系数标定-----开始----------------------------------------------------------------------------------------
+            if mainstepstatus.OdoExtParamsCalibStatus.ExtParamsCalib_RunningFlag  && generalstatus.Value_odo_flag == 1
+                % <Note> Function: OdoExtParamsCalib
+                % input:
+                %     tempsensorvaluetab
+                %     vel
+                % output:
+                %     config {cvb, d_yaw_v2b, k0001, k0002, k0003, k0004}
+                %     p_filter
+                %     configupdateflag
+                % inout:
+                %     odoextparamscalibstatus
+                %     x_filter
+                % </Note>
+                [config, mainstepstatus.OdoExtParamsCalibStatus, mainstepstatus.x_filter, mainstepstatus.p_filter, output.ConfigUpdateFlag] = ...
+                    OdoExtParamsCalib(config, mainstepstatus.OdoExtParamsCalibStatus, tempsensorvaluetab, output.vel, mainstepstatus.x_filter, mainstepstatus.p_filter, output.ConfigUpdateFlag);
+            end
+            
+
+
+
+            % mainstepstatus.before_att = output.att;
+            % mainstepstatus.before_vel = output.vel;
+            % mainstepstatus.before_pos = output.pos;
+            % mainstepstatus.before_imu = tempsensorvaluetab.imu;
+            mainstepstatus.before_v_ins = output.v_ins;
+
+            mainstepstatus.y1 = [mainstepstatus.y1(2:end-1); sqrt(sum(tempsensorvaluetab.imu(4:6) .* tempsensorvaluetab.imu(4:6))); 0];
+
+            if mainstepstatus.imu6_1_idx < int32(size(mainstepstatus.imu6_1_rcd, 1))
+                mainstepstatus.imu6_1_sum = mainstepstatus.imu6_1_sum - mainstepstatus.imu6_1_rcd(mainstepstatus.imu6_1_idx);
+                mainstepstatus.imu6_1_rcd(mainstepstatus.imu6_1_idx) = tempsensorvaluetab.imu(6);
+                mainstepstatus.imu6_1_idx = mod(mainstepstatus.imu6_1_idx, size(mainstepstatus.imu6_1_rcd, 1)) + int32(1);
+                mainstepstatus.imu6_1_sum = mainstepstatus.imu6_1_sum + tempsensorvaluetab.imu(6);
+                mainstepstatus.imu6_1_sum_recalc = mainstepstatus.imu6_1_sum_recalc + tempsensorvaluetab.imu(6);
+            else
+                mainstepstatus.imu6_1_sum = mainstepstatus.imu6_1_sum_recalc + tempsensorvaluetab.imu(6);
+                mainstepstatus.imu6_1_rcd(mainstepstatus.imu6_1_idx) = tempsensorvaluetab.imu(6);
+                mainstepstatus.imu6_1_idx = int32(1);
+                mainstepstatus.imu6_1_sum_recalc = 0;
+            end
+
+            if input.updateflags_gnss || output.updateflags_goe
+                generalstatus.goe_latest = tempsensorvaluetab.goe;
+                generalstatus.goe12_latest = tempsensorvaluetab.goe12 ;
+            end
+
+            if input.updateflags_gnss || output.updateflags_gps
+                mainstepstatus.gps123_prv = tempsensorvaluetab.gps(1:3);
+                mainstepstatus.gps567_prv = tempsensorvaluetab.gps(5:7);
+            end
+
+            if output.updateflags_gps
+                mainstepstatus.gps10_prv = output.gps(10);
+            end
+
+            if output.updateflags_gps
+                mainstepstatus.gps8_1_rcd(mainstepstatus.gps8_1_idx) = tempsensorvaluetab.gps(8);
+                mainstepstatus.gps8_1_idx = mod(mainstepstatus.gps8_1_idx, size(mainstepstatus.gps8_1_rcd, 1)) + int32(1);
+
+                gps8_tmp1 = tempsensorvaluetab.gps(8);
+                gps8_tmp2 = tempsensorvaluetab.gps(8);
+                if gps8_tmp2 > 0 && gps8_tmp2 < pi
+                    gps8_tmp2 = 2 * pi - gps8_tmp2;
+                else
+                    gps8_tmp2 = gps8_tmp2 - pi;
+                end
+                if mainstepstatus.gps8_2_idx < int32(size(mainstepstatus.gps8_2_rcd, 1))
+                    mainstepstatus.gps8_2_sum(1) = mainstepstatus.gps8_2_sum(1) - mainstepstatus.gps8_2_rcd(mainstepstatus.gps8_2_idx, 1);
+                    mainstepstatus.gps8_2_sum(2) = mainstepstatus.gps8_2_sum(2) - mainstepstatus.gps8_2_rcd(mainstepstatus.gps8_2_idx, 2);
+                    mainstepstatus.gps8_2_rcd(mainstepstatus.gps8_2_idx, 1) = gps8_tmp1;
+                    mainstepstatus.gps8_2_rcd(mainstepstatus.gps8_2_idx, 2) = gps8_tmp2;
+                    mainstepstatus.gps8_2_idx = mod(mainstepstatus.gps8_2_idx, size(mainstepstatus.gps8_2_rcd, 1)) + int32(1);
+                    mainstepstatus.gps8_2_sum(1) = mainstepstatus.gps8_2_sum(1) + gps8_tmp1;
+                    mainstepstatus.gps8_2_sum(2) = mainstepstatus.gps8_2_sum(2) + gps8_tmp2;
+                    mainstepstatus.gps8_2_sum_recalc(1) = mainstepstatus.gps8_2_sum_recalc(1) + gps8_tmp1;
+                    mainstepstatus.gps8_2_sum_recalc(2) = mainstepstatus.gps8_2_sum_recalc(2) + gps8_tmp2;
+                else
+                    mainstepstatus.gps8_2_sum(1) = mainstepstatus.gps8_2_sum_recalc(1) + gps8_tmp1;
+                    mainstepstatus.gps8_2_sum(2) = mainstepstatus.gps8_2_sum_recalc(2) + gps8_tmp2;
+                    mainstepstatus.gps8_2_rcd(mainstepstatus.gps8_2_idx, 1) = gps8_tmp1;
+                    mainstepstatus.gps8_2_rcd(mainstepstatus.gps8_2_idx, 2) = gps8_tmp2;
+                    mainstepstatus.gps8_2_idx = int32(1);
+                    mainstepstatus.gps8_2_sum_recalc(1) = 0;
+                    mainstepstatus.gps8_2_sum_recalc(2) = 0;
+                end
+            end
+
+        otherwise
+    end
+    mainstepstatus.before_att = output.att;
+    mainstepstatus.before_vel = output.vel;
+    mainstepstatus.before_pos = output.pos;
+    mainstepstatus.before_imu = tempsensorvaluetab.imu;
+end

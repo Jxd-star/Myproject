@@ -1,0 +1,102 @@
+% function FN = Fai(kalman)
+%     WN=Consts.wie*cos(kalman.pos(1));
+%     WU=Consts.wie*sin(kalman.pos(1));
+%      RM=kalman.rm;RN=kalman.rn;H=kalman.pos(3);fE=kalman.fn(1);fN=kalman.fn(2);fU=kalman.fn(3);VE=kalman.vel(1);VN=kalman.vel(2);VU=kalman.vel(3); Cb_n = kalman.cbn ; g = kalman.g ;
+% 
+%     x = 1 ;
+% 
+%     FN=zeros(18,18);          %FN为9x9的矩阵
+%     FN(1,9)=VN/((RM+H)^2);
+%     FN(1,5)=-1/(RM+H);
+%     FN(1,2)=WU+VE*tan(kalman.pos(1))/(RN+H);
+%     FN(1,3)=-(WN+VE/(RN+H));
+%     FN(2,7)=-WU / x ;
+%     FN(2,9)=-VE/(RN+H)^2;
+%     FN(2,4)=1/(RN+H);
+%     FN(2,1)=-(WU+VE*tan(kalman.pos(1))/(RN+H));
+%     FN(2,3)=-VN/(RM+H);
+%     FN(3,7)=WN+VE*(sec(kalman.pos(1)))^2/(RN+H)  / x ;
+%     FN(3,9)=-VE*tan(kalman.pos(1))/(RN+H)^2;
+%     FN(3,4)=tan(kalman.pos(1))/(RN+H);
+%     FN(3,1)=WN+VE/(RN+H);
+%     FN(3,2)=VN/(RM+H);          %%
+%     FN(4,7)=2*(VN*WN+VU*WU)+VE*VN*(sec(kalman.pos(1)))^2/(RN+H)  / x ;    %%
+%     FN(4,9)=VE*(VU-VN*tan(kalman.pos(1)))/(RN+H)^2;
+%     FN(4,4)=(VN*tan(kalman.pos(1))-VU)/(RN+H);
+%     FN(4,5)=2*WU+VE*tan(kalman.pos(1))/(RN+H);
+%     FN(4,6)=-(2*WN+VE/(RN+H));
+%     FN(4,2)=-fU;
+%     FN(4,3)=fN;
+%     FN(5,7)=-VE*(2*WN+VE*sec(kalman.pos(1))^2/(RN+H))  / x ;  %%%%%%%%%%%% FN(5,7)=-VE*(2*WN+VE*sec(kalman.pos(1))^2)/(RN+H);
+%     FN(5,9)=VN*VU/(RM+H)^2+VE^2*tan(kalman.pos(1))/(RN+H)^2;
+%     FN(5,4)=-2*(WU+VE*tan(kalman.pos(1))/(RN+H));
+%     FN(5,5)=-VU/(RM+H);
+%     FN(5,6)=-VN/(RM+H);
+%     FN(5,1)=fU;
+%     FN(5,3)=-fE; %%
+%     FN(6,7)=-(2*WU*VE)  / x ;
+%     FN(6,9)=-(VE^2/(RN+H)^2+VN^2/(RM+H)^2); %%
+%     FN(6,4)=2*(WN+VE/(RN+H));
+%     FN(6,5)=2*VN/(RM+H);
+%     FN(6,1)=-fN;
+%     FN(6,2)=fE;
+%     FN(7,9)=-VN/(RM+H)^2 * x ;
+%     FN(7,5)=1/(RM+H) * x;
+%     FN(8,7)=VE*sec(kalman.pos(1))*tan(kalman.pos(1))/(RN+H) ;
+%     FN(8,9)=-VE*sec(kalman.pos(1))/(RN+H)^2 * x;
+%     FN(8,4)=sec(kalman.pos(1))/(RN+H) * x;
+%     FN(9,6)=1;
+% 
+% 
+%     FN(1 : 3 , 10 : 12) = -Cb_n ;
+%     FN(4 : 6 , 13 : 15) = Cb_n ;
+% 
+% end
+% 
+
+function FN = Fai(kalman)
+    WN=Consts.wie*cos(kalman.pos(1));
+    WU=Consts.wie*sin(kalman.pos(1));
+     RM=kalman.rm;RN=kalman.rn;H=kalman.pos(3);fE=kalman.fn(1);fN=kalman.fn(2);fU=kalman.fn(3);VE=kalman.vel(1);VN=kalman.vel(2);VU=kalman.vel(3); Cb_n = kalman.cbn ; g = kalman.g ;
+
+    x = 1 ;
+
+    FN=zeros(18,18);          %FN为9x9的矩阵
+    FN(1,2)=WU;
+    FN(1,3)=-(WN);
+    FN(2,1)=-(WU);
+    FN(3,1)=WN;        %%
+    FN(4,7)=2*(VN*WN+VU*WU)+VE*VN*(sec(kalman.pos(1)))^2/(RN+H)  / x ;    %%
+    FN(4,9)=VE*(VU-VN*tan(kalman.pos(1)))/(RN+H)^2;
+    FN(4,4)=(VN*tan(kalman.pos(1))-VU)/(RN+H);
+    FN(4,5)=2*WU+VE*tan(kalman.pos(1))/(RN+H);
+    FN(4,6)=-(2*WN+VE/(RN+H));
+    FN(4,2)=-fU;
+    FN(4,3)=fN;
+    FN(5,7)=-VE*(2*WN+VE*sec(kalman.pos(1))^2/(RN+H))  / x ;  %%%%%%%%%%%% FN(5,7)=-VE*(2*WN+VE*sec(kalman.pos(1))^2)/(RN+H);
+    FN(5,9)=VN*VU/(RM+H)^2+VE^2*tan(kalman.pos(1))/(RN+H)^2;
+    FN(5,4)=-2*(WU+VE*tan(kalman.pos(1))/(RN+H));
+    FN(5,5)=-VU/(RM+H);
+    FN(5,6)=-VN/(RM+H);
+    FN(5,1)=fU;
+    FN(5,3)=-fE; %%
+    FN(6,7)=-(2*WU*VE)  / x ;
+    FN(6,9)=-(VE^2/(RN+H)^2+VN^2/(RM+H)^2); %%
+    FN(6,4)=2*(WN+VE/(RN+H));
+    FN(6,5)=2*VN/(RM+H);
+    FN(6,1)=-fN;
+    FN(6,2)=fE;
+    FN(7,9)=-VN/(RM+H)^2 * x ;
+    FN(7,5)=1/(RM+H) * x;
+    FN(8,7)=VE*sec(kalman.pos(1))*tan(kalman.pos(1))/(RN+H) ;
+    FN(8,9)=-VE*sec(kalman.pos(1))/(RN+H)^2 * x;
+    FN(8,4)=sec(kalman.pos(1))/(RN+H) * x;
+    FN(9,6)=1;
+
+  
+    FN(1 : 3 , 10 : 12) = -Cb_n ;
+    FN(4 : 6 , 13 : 15) = Cb_n ;
+
+end
+
+
